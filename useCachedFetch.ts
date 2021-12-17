@@ -1,5 +1,3 @@
-// TODO: TESTING
-
 import { useRef, useState, useEffect, useCallback } from 'react';
 
 interface useCachedFetchResponseType<T> {
@@ -8,7 +6,7 @@ interface useCachedFetchResponseType<T> {
     fetch?: (info?: lazyFetchProps) => void;
 }
 
-interface lazyFetchProps extends Request {
+interface lazyFetchProps extends Partial<Request> {
     useCache?: boolean,
     mergeConfigWithInitial?: boolean
 }
@@ -23,6 +21,8 @@ interface CacheObj<T> {
     TTL: number;
     data: T;
 }
+
+const getUnixTime = () => Math.round((new Date()).getTime() / 1000);
 
 export const useCachedFetch = <T>(
     info: Partial<Request>,
@@ -41,22 +41,19 @@ export const useCachedFetch = <T>(
     // current api data
     const [data, setData] = useState<T>();
     // request loading
-    const [loading, setLoading] = useState<boolean>(!lazy);
-
-    useEffect(() => {
-        // keep fetchParams updated
-        fetchParams.current = info;
-    }, [info]);
+    const [loading, setLoading] = useState<boolean>(false);
 
     const fetcher = useCallback(async () => {
         try {
-            // to prevent decoupled requests
-            if (loading) return;
+            // check cache and return if found response
+            if (
+                cache.current.has(JSON.stringify(fetchParams.current))
+                && useFetchCache.current &&
+                // make sure the cache is not stale / has passed ttl till last call
+                Number(cache.current.get(JSON.stringify(fetchParams.current))?.TTL) > getUnixTime()
+            ) return setData(cache.current.get(JSON.stringify(fetchParams.current))?.data);
 
             setLoading(true);
-
-            // check cache and return if found response
-            if (cache.current.has(JSON.stringify(fetchParams.current)) && useFetchCache.current) return cache.current.get(JSON.stringify(fetchParams.current));
 
             const data = await fetch(fetchParams.current.url || '', fetchParams.current as Request);
 
@@ -67,7 +64,7 @@ export const useCachedFetch = <T>(
             setData(response);
             // add to cache
             cache.current.set(JSON.stringify(fetchParams.current), {
-                TTL: Math.round((new Date()).getTime() / 1000) + cacheTTL, // some unix time here, because "javascript"
+                TTL: getUnixTime() + cacheTTL, // some unix time here, because "javascript"
                 data: response
             })
         } catch (error) {
@@ -75,17 +72,20 @@ export const useCachedFetch = <T>(
         } finally {
             // hydrate the cache;
             cache.current.forEach(({ TTL }, key, self) => {
-                if (TTL < Math.round((new Date()).getTime() / 1000)) self.delete(key);
+                if (TTL < getUnixTime()) self.delete(key);
             });
             setLoading(false);
         }
-    }, [cacheTTL, errorCb, loading]);
+    }, [cacheTTL, errorCb]);
 
     useEffect(() => {
-        if (lazy) return;
+        // keep fetchParams updated
+        fetchParams.current = info;
+    }, [info]);
 
+    useEffect(() => {
         fetcher();
-    }, [fetcher, lazy]);
+    }, [fetcher]);
 
     return {
         data,
