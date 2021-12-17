@@ -1,0 +1,24 @@
+{
+  "name": "react-hooks",
+  "version": "1.0.0",
+  "description": "awesome react hooks",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/911mateo911/hooks-x-react.git"
+  },
+  "author": "911mateo911",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/911mateo911/hooks-x-react/issues"
+  },
+  "homepage": "https://github.com/911mateo911/hooks-x-react#readme",
+  "devDependencies": {
+    "@types/node": "^17.0.0",
+    "@types/react": "^17.0.37",
+    "react": "^17.0.2"
+  }
+}
