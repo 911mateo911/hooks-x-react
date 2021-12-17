@@ -1,9 +1,22 @@
+// TODO: TESTING
+
 import { useRef, useState, useEffect, useCallback } from 'react';
 
 interface useCachedFetchResponseType<T> {
     data: T | undefined;
     loading: boolean;
-    fetch?: (info: Request, useCache: boolean, mergeWithInitial?: boolean) => void;
+    fetch?: (info?: lazyFetchProps) => void;
+}
+
+interface lazyFetchProps extends Request {
+    useCache?: boolean,
+    mergeConfigWithInitial?: boolean
+}
+
+interface useCachedFetchProps {
+    cacheTTL?: number;
+    errorCb?: (error: Error | unknown) => void;
+    lazy?: boolean
 }
 
 interface CacheObj<T> {
@@ -11,71 +24,79 @@ interface CacheObj<T> {
     data: T;
 }
 
-export const useCachedFetch = <T>(info: Partial<Request>, lazy?: boolean): useCachedFetchResponseType<T> => {
-    // TODO: fix double request on startup
-    // TEST: lazy fetch
-
-    const cache = useRef(new Map<Partial<Request>, CacheObj<T>>());
+export const useCachedFetch = <T>(
+    info: Partial<Request>,
+    {
+        cacheTTL = 120,
+        errorCb,
+        lazy = false
+    }: useCachedFetchProps
+): useCachedFetchResponseType<T> => {
+    // map of all the Request object that you have sent
+    const cache = useRef(new Map<string, CacheObj<T>>());
+    // your current fetch params
     const fetchParams = useRef<Partial<Request>>(info);
+    // used by lazy fetch if you want to use the cache
     const useFetchCache = useRef<boolean>(true);
+    // current api data
     const [data, setData] = useState<T>();
+    // request loading
     const [loading, setLoading] = useState<boolean>(!lazy);
-    const [shouldFetch, setShouldFetch] = useState<boolean>(true);
+
+    useEffect(() => {
+        // keep fetchParams updated
+        fetchParams.current = info;
+    }, [info]);
 
     const fetcher = useCallback(async () => {
         try {
-            setShouldFetch(false);
+            // to prevent decoupled requests
+            if (loading) return;
+
             setLoading(true);
 
-            console.log(cache.current.has(fetchParams.current), cache.current)
-
-            if (cache.current.has(fetchParams.current) && useFetchCache.current) return cache.current.get(fetchParams.current);
+            // check cache and return if found response
+            if (cache.current.has(JSON.stringify(fetchParams.current)) && useFetchCache.current) return cache.current.get(JSON.stringify(fetchParams.current));
 
             const data = await fetch(fetchParams.current.url || '', fetchParams.current as Request);
 
+            // get the response
             const response = await data.json() as T;
 
+            // update component
             setData(response);
-            cache.current.set(fetchParams.current, {
-                TTL: Date.now() + 3000, // some shit unix time here
+            // add to cache
+            cache.current.set(JSON.stringify(fetchParams.current), {
+                TTL: Math.round((new Date()).getTime() / 1000) + cacheTTL, // some unix time here, because "javascript"
                 data: response
             })
         } catch (error) {
-            console.error(error);
+            errorCb ? errorCb(error) : console.error(error);
         } finally {
-            // cache.current.forEach(({ TTL }, key, self) => {
-            //     if (TTL > Date.now()) self.delete(key);
-            // });
-            console.log(cache.current)
+            // hydrate the cache;
+            cache.current.forEach(({ TTL }, key, self) => {
+                if (TTL < Math.round((new Date()).getTime() / 1000)) self.delete(key);
+            });
             setLoading(false);
-            setShouldFetch(true);
         }
-    }, [])
+    }, [cacheTTL, errorCb, loading]);
 
     useEffect(() => {
         if (lazy) return;
 
         fetcher();
-        // eslint-disable-next-line
-    }, [lazy]);
-
-    useEffect(() => {
-        if (!shouldFetch) return;
-
-        fetcher();
-        // eslint-disable-next-line
-    }, []);
+    }, [fetcher, lazy]);
 
     return {
         data,
         loading,
         ...(lazy && {
-            fetch: (info, useCache = true, mergeConfigWithInitial = false) => {
+            fetch: ({ mergeConfigWithInitial = true, useCache = true } = {} as lazyFetchProps) => {
                 if (mergeConfigWithInitial) fetchParams.current = { ...fetchParams.current, ...info };
                 else { fetchParams.current = info };
 
                 useFetchCache.current = useCache;
-                setShouldFetch(true);
+                fetcher()
             }
         })
     }
